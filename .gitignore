@@ -1,0 +1,4 @@
+# Ignore any other directories or files that you don't want to commit
+default_files/
+segments_16k_2/
+tagging/
