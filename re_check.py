@@ -5,9 +5,8 @@ import os
 
 def safe_rerun():
     """
-    Call the appropriate rerun function depending on the Streamlit version.
-    Uses st.rerun() (Streamlit >=1.27) or st.experimental_rerun() as a fallback.
-    Exceptions raised during rerun are caught to avoid displaying tracebacks.
+    Gọi hàm rerun phù hợp với phiên bản Streamlit hiện tại.
+    Sử dụng st.rerun() (Streamlit >=1.27) hoặc st.experimental_rerun() nếu cần.
     """
     try:
         if hasattr(st, "rerun"):
@@ -18,14 +17,14 @@ def safe_rerun():
         pass
 
 
-# Directory containing the CSV batch files
+# Thư mục chứa các file CSV batch đã được xác nhận
 BATCH_DIR = "verified_batches"
 
 
 def load_batch_file():
     """
-    Read the confirmed CSV file from the session state.
-    Creates an 'audio_path' column by prepending the fixed directory path to each file name.
+    Đọc file CSV đã được xác nhận (từ session_state).
+    Tạo cột 'audio_path' dựa vào cột đã có trong CSV và chỉ load những dòng có tag là "Yes".
     """
     csv_path = os.path.join(BATCH_DIR, st.session_state.confirmed_csv)
     try:
@@ -33,37 +32,48 @@ def load_batch_file():
     except Exception as e:
         st.error(f"Error reading CSV: {e}")
         st.stop()
-    if "audio_path" in df.columns:
-        df["audio_path"] = df["audio_path"]
-    else:
+
+    if "audio_path" not in df.columns:
         st.error("CSV file must have an 'audio_path' column.")
         st.stop()
+
+    # Nếu cần chuyển đổi audio_path (ở đây chỉ giữ nguyên giá trị)
+    df["audio_path"] = df["audio_path"].apply(lambda x: f"{x}")
+
+    # Lọc các dòng có tag bằng "Yes"
+    if "tag" in df.columns:
+        df = df[df["tag"] == "Yes"]
+        df = df.reset_index(drop=True)
+    else:
+        st.error("CSV file must have a 'tag' column.")
+        st.stop()
+
     return df
 
 
 def initialize_state_from_file():
     """
-    Initialize navigation and editing variables based on the confirmed CSV file.
+    Khởi tạo các biến điều hướng và chỉnh sửa dựa trên file CSV đã xác nhận.
     
-    Sets the following session state variables:
-      - current_index: the current row index (initialized to 0)
-      - edited_transcripts: list of transcripts loaded from the CSV
-      - tags: list of tags loaded from the CSV if the 'tag' column exists,
-              otherwise a list of None values
-      - row_confirmed: flag indicating whether the row has been confirmed for detail view
+    Thiết lập các biến sau trong session_state:
+      - current_index: chỉ số dòng hiện tại (khởi tạo bằng 0)
+      - edited_transcripts: danh sách transcript từ CSV
+      - tags: danh sách tag từ CSV
+      - confirmed_rows: danh sách trạng thái confirm cho mỗi dòng (False ban đầu)
+      - row_confirmed: cờ báo dòng đã được chọn hiển thị chi tiết
     """
     df = load_batch_file()
     st.session_state.current_index = 0
     st.session_state.edited_transcripts = df["transcripts"].tolist()
-    # If a 'tag' column exists, load its values; otherwise, initialize with None.
-    st.session_state.tags = df["tag"].tolist() if "tag" in df.columns else [None] * len(df)
+    st.session_state.tags = df["tag"].tolist()
+    st.session_state.confirmed_rows = [False] * len(df)
     st.session_state.row_confirmed = False
 
 
 def display_item(df, index):
     """
-    Display the audio and transcript for the row at the given index.
-    Two buttons ("Yes" and "No") update the tag for that row.
+    Hiển thị audio và transcript của dòng được chọn.
+    Có ba nút: "Yes", "No" để cập nhật tag và nút "Confirm" có chức năng toggle highlight.
     """
     if 0 <= index < len(df):
         audio_path = df["audio_path"].iloc[index]
@@ -87,11 +97,18 @@ def display_item(df, index):
             ),
         )
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         if col1.button("Yes", key=f"yes_{index}"):
             st.session_state.tags[index] = "Yes"
         if col2.button("No", key=f"no_{index}"):
             st.session_state.tags[index] = "No"
+
+        # Xác định trạng thái hiện tại của nút confirm và thay đổi nhãn tương ứng
+        current_confirm_state = st.session_state.confirmed_rows[index]
+        confirm_label = "Unconfirm" if current_confirm_state else "Confirm"
+        if col3.button(confirm_label, key=f"confirm_{index}"):
+            st.session_state.confirmed_rows[index] = not current_confirm_state
+            safe_rerun()
         return True
     else:
         st.write("No more items.")
@@ -99,13 +116,13 @@ def display_item(df, index):
 
 
 def main():
-    # List all CSV files in the BATCH_DIR
+    # Liệt kê tất cả các file CSV trong BATCH_DIR
     csv_files = sorted([f for f in os.listdir(BATCH_DIR) if f.endswith(".csv")])
     if not csv_files:
-        st.error("No CSV files found in the unverified_batches directory.")
+        st.error("No CSV files found in the verified_batches directory.")
         st.stop()
 
-    # Initialize keys in session state if they do not exist
+    # Khởi tạo các key trong session_state nếu chưa tồn tại
     if "batch_confirmed" not in st.session_state:
         st.session_state.batch_confirmed = False
     if "confirmed_csv" not in st.session_state:
@@ -115,7 +132,7 @@ def main():
     if "row_confirmed" not in st.session_state:
         st.session_state.row_confirmed = False
 
-    # Sidebar: If the batch file is not yet confirmed, show the file selection widget.
+    # Sidebar: Nếu file batch chưa được xác nhận, hiển thị widget chọn file.
     if not st.session_state.batch_confirmed:
         chosen_file = st.sidebar.selectbox(
             "Chọn file Batch CSV", csv_files, key="selected_csv"
@@ -136,6 +153,7 @@ def main():
                 "current_index",
                 "edited_transcripts",
                 "tags",
+                "confirmed_rows",
                 "selected_row",
                 "row_confirmed",
             ]:
@@ -146,59 +164,63 @@ def main():
         st.info("Vui lòng confirm file batch để tiếp tục.")
         st.stop()
 
-    # Load the confirmed CSV file.
+    # Load file CSV đã xác nhận
     df = load_batch_file()
     df = pd.DataFrame(df, columns=["audio_path", "transcripts", "tag"])
 
-    # Update session state variables if the lengths do not match the DataFrame.
+    # Cập nhật các biến session state nếu độ dài không khớp với DataFrame
     if "edited_transcripts" not in st.session_state or len(st.session_state.edited_transcripts) != len(df):
         st.session_state.edited_transcripts = df["transcripts"].tolist()
     if "tags" not in st.session_state or len(st.session_state.tags) != len(df):
-        st.session_state.tags = df["tag"].tolist() if "tag" in df.columns else [None] * len(df)
+        st.session_state.tags = df["tag"].tolist()
+    if "confirmed_rows" not in st.session_state or len(st.session_state.confirmed_rows) != len(df):
+        st.session_state.confirmed_rows = [False] * len(df)
 
-    # Create a container for the DataFrame preview that updates continuously.
-    preview_container = st.empty()
+    # Cập nhật DataFrame với giá trị mới từ session state
     df["transcripts"] = st.session_state.edited_transcripts
     df["tag"] = st.session_state.tags
+
+    # Tạo container hiển thị preview bảng với style thay đổi dựa trên trạng thái confirm
+    preview_container = st.empty()
+
+    def highlight_confirmed(row):
+        if st.session_state.confirmed_rows[row.name]:
+            return ['background-color: lightgreen'] * len(row)
+        else:
+            return [''] * len(row)
+
+    styled_df = df.style.apply(highlight_confirmed, axis=1)
     preview_container.write("### DataFrame Preview (Updated):")
-    preview_container.dataframe(df)
+    preview_container.dataframe(styled_df)
 
-    # Display the count of rows whose tag is still None.
-    remaining = st.session_state.tags.count(None)
-    if remaining > 0:
-        st.markdown(
-            f"<span style='color:red;'>Số tag chưa cập nhật: {remaining}</span>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            "<span style='color:green;'>Tất cả tag đã được cập nhật!</span>",
-            unsafe_allow_html=True,
-        )
+    # Hiển thị số dòng đã confirm
+    confirmed_count = st.session_state.confirmed_rows.count(True)
+    st.markdown(f"**Đã confirm:** {confirmed_count} dòng")
 
-    # Selectbox for choosing a row to view details (this widget does not change the session state by itself)
+    # Selectbox để chọn dòng hiển thị chi tiết
     selected_row_widget = st.selectbox(
         "Select a row to view details",
         list(range(len(df))),
         index=st.session_state.selected_row,
-        format_func=lambda i: f"Index {i}: {df.loc[i, 'transcripts'][:50]}",
+        format_func=lambda i: f"Index {i}: {df.loc[i, 'transcripts'][:100]}",
         key="selected_row",
     )
     temp_selected_row = selected_row_widget
 
-    # Button to confirm the selected row.
+    # Nút xác nhận dòng được chọn
     if st.button("Confirm Row Selection"):
         st.session_state.current_index = temp_selected_row
         st.session_state.row_confirmed = True
+        safe_rerun()
 
-    # If a row has been confirmed, display its detail view (audio and transcript).
+    # Nếu đã xác nhận dòng, hiển thị chi tiết (audio và transcript kèm nút confirm)
     if st.session_state.row_confirmed:
         st.write("### Detail View:")
         display_item(df, st.session_state.current_index)
     else:
         st.info("Vui lòng nhấn 'Confirm Row Selection' để hiển thị chi tiết của dòng đã chọn.")
 
-    # Navigation buttons to move to the previous/next row.
+    # Các nút điều hướng chuyển đến dòng trước/sau
     col1, col2 = st.columns(2)
     if col1.button("Previous"):
         st.session_state.current_index = max(0, st.session_state.current_index - 1)
@@ -212,8 +234,11 @@ def main():
         st.session_state.row_confirmed = True
         safe_rerun()
 
-    # Button to download the updated CSV file (with changes to transcripts and tags).
+    # Nút download CSV với dữ liệu đã được cập nhật
     if st.button("Download Data (CSV)"):
+        # Cập nhật DataFrame với transcript và tag mới nhất
+        df["transcripts"] = st.session_state.edited_transcripts
+        df["tag"] = st.session_state.tags
         csv_file = df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
         st.download_button(
             label="Download CSV",

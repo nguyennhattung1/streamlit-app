@@ -32,4 +32,4 @@ EXPOSE 8501
 ENV STREAMLIT_CONFIG="/app/.streamlit/config.toml"
 
 # Chạy ứng dụng Streamlit
-CMD ["streamlit", "run", "re_check.py", "--server.port=8501", "--server.address=0.0.0.0"]"
+CMD ["streamlit", "run", "re_check.py", "--server.port=8501", "--server.address=0.0.0.0"]
