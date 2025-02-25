@@ -10,11 +10,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Sao chép toàn bộ mã nguồn vào container
 COPY segments_16k /app/segments_16k
-COPY building.py /app/building.py
-COPY batches /app/batches
-
+# COPY building.py /app/building.py
+# COPY batches /app/batches
+COPY re_check.py /app/re_check.py
+COPY verified_batches /app/verified_batches
 # Mở port mà Streamlit sử dụng (mặc định là 8501)
 EXPOSE 8501
 
 # Chạy ứng dụng Streamlit (sử dụng file buildind.py)
-CMD ["streamlit", "run", "building.py", "--server.port", "8501", "--server.enableCORS", "false"]
+CMD ["streamlit", "run", "re_check.py", "--server.port", "8501", "--server.enableCORS", "false"]
